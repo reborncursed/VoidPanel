@@ -26,7 +26,7 @@ local function RunIntro()
     title.Size = UDim2.new(1,0,0,70)
     title.Position = UDim2.new(0,0,0.28,0)
     title.BackgroundTransparency = 1
-    title.Text = "RIVALS PANEL"
+    title.Text = "VoidPanel"
     title.TextColor3 = Color3.fromRGB(201,168,76)
     title.Font = Enum.Font.Code -- fallback, reemplazado por CustomFont
     title.TextSize = 52
@@ -50,7 +50,7 @@ local function RunIntro()
     sub1.Size = UDim2.new(1,0,0,26)
     sub1.Position = UDim2.new(0,0,0.28,74)
     sub1.BackgroundTransparency = 1
-    sub1.Text = "by iSacredRivals"
+    sub1.Text = "by CursedExility"
     sub1.TextColor3 = Color3.fromRGB(240,208,128)
     sub1.Font = Enum.Font.GothamBold
     sub1.TextSize = 17
@@ -573,7 +573,7 @@ end)
 --  [12] ROOT GUI
 -- ============================================================
 local pgui = LP:WaitForChild("PlayerGui")
-if pgui:FindFirstChild("RivalsPanel") then pgui.RivalsPanel:Destroy() end
+if pgui:FindFirstChild("VoidPanel") then pgui.RivalsPanel:Destroy() end
 local ScreenGui = Instance.new("ScreenGui",pgui)
 ScreenGui.Name="RivalsPanel"; ScreenGui.ResetOnSpawn=false
 ScreenGui.ZIndexBehavior=Enum.ZIndexBehavior.Sibling
