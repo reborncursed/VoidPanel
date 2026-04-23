@@ -1,5 +1,5 @@
 -- ============================================================
---   RIVALS PANEL  ·  by iSacredRivals
+--   VOID PANEL  ·  by CursedExility
 --   Blox Fruits  ·  Compatible con Delta Executor
 -- ============================================================
 
@@ -9,7 +9,7 @@
 local function RunIntro()
     local TS2 = game:GetService("TweenService")
     local introGui = Instance.new("ScreenGui")
-    introGui.Name = "RivalsIntro"
+    introGui.Name = "VoidIntro"
     introGui.IgnoreGuiInset = true
     introGui.DisplayOrder = 999
     pcall(function() introGui.Parent = game:GetService("CoreGui") end)
