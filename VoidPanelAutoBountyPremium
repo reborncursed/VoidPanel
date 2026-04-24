@@ -1,0 +1,668 @@
+-- ╔══════════════════════════════════════════════════════════╗
+--   VOID PANEL AUTO BOUNTY  ·  by CursedExility
+--   Blox Fruits  ·  Compatible with Delta Executor
+--   Version 5.0 - ULTRA
+-- ╚══════════════════════════════════════════════════════════╝
+
+local Players           = game:GetService("Players")
+local RunService        = game:GetService("RunService")
+local UserInputService  = game:GetService("UserInputService")
+local TweenService      = game:GetService("TweenService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local TeleportService   = game:GetService("TeleportService")
+local LP = Players.LocalPlayer
+
+local CFG = {
+    AutoBounty     = false,
+    InstantKill    = false,
+    FruitSupport   = false,
+    AutoSwitch     = false,
+    AutoHopServer  = false,
+    AutoV3         = false,
+    AutoV4         = false,
+    AntiAFK        = true,
+    Humanizer      = true,
+    KillDelay      = 0,
+    SwitchDelay    = 0.5,
+    SelectedFruit  = "TRex",
+    SelectedRegion = "HK",
+    SelectedTeam   = "Pirates",
+    MaxKills       = 10,
+}
+
+local FruitSkills = {
+    TRex    = {"Q","E","R","T"},
+    Kit     = {"Q","E","R","T"},
+    Leo     = {"Q","E","R","T"},
+    Dragon  = {"Q","E","R","T"},
+    Kitsune = {"Q","E","R","T"},
+    Dough   = {"Q","E","R","T"},
+    Shadow  = {"Q","E","R","T"},
+}
+
+local currentTarget  = nil
+local autoBountyConn = nil
+local killCount      = 0
+local gainedBounty   = 0
+local sessionStart   = tick()
+local hopCooldown    = false
+local serverKills    = 0
+
+local function getRoot()
+    local c = LP.Character
+    return c and c:FindFirstChild("HumanoidRootPart")
+end
+
+local function isAlive(p)
+    if not p or not p.Character then return false end
+    local h = p.Character:FindFirstChildOfClass("Humanoid")
+    return h and h.Health > 0
+end
+
+local function getHP(p)
+    if not p or not p.Character then return 0,0 end
+    local h = p.Character:FindFirstChildOfClass("Humanoid")
+    if not h then return 0,0 end
+    return math.floor(h.Health), math.floor(h.MaxHealth)
+end
+
+local function getHPPercent(p)
+    local hp,maxhp = getHP(p)
+    if maxhp == 0 then return 0 end
+    return math.floor((hp/maxhp)*100)
+end
+
+local function getBounty(p)
+    local d = p:FindFirstChild("leaderstats") or p:FindFirstChild("Data")
+    if d then
+        local b = d:FindFirstChild("Bounty") or d:FindFirstChild("Kills")
+        return b and b.Value or 0
+    end
+    return 0
+end
+
+local function getLevel(p)
+    local d = p:FindFirstChild("leaderstats") or p:FindFirstChild("Data")
+    if d then
+        local lv = d:FindFirstChild("Level") or d:FindFirstChild("Lv")
+        return lv and lv.Value or 0
+    end
+    return 0
+end
+
+local function formatNum(n)
+    if n >= 1000000 then return string.format("$%.2fM", n/1000000)
+    elseif n >= 1000 then return string.format("$%.1fK", n/1000)
+    else return "$"..tostring(n) end
+end
+
+local function hideName(name)
+    return string.rep("*", #name)
+end
+
+local function teleportTo(target)
+    local root = getRoot()
+    if not root or not target or not target.Character then return end
+    local tr = target.Character:FindFirstChild("HumanoidRootPart")
+    if tr then root.CFrame = tr.CFrame * CFrame.new(0,0,-2.5) end
+end
+
+local function useSkills()
+    local skills = FruitSkills[CFG.SelectedFruit]
+    if not skills then return end
+    for _,key in pairs(skills) do
+        pcall(function()
+            UserInputService.InputBegan:Fire(
+                {KeyCode=Enum.KeyCode[key], UserInputType=Enum.UserInputType.Keyboard}, false
+            )
+        end)
+        task.wait(0.005)
+    end
+end
+
+local function killTarget(target)
+    if not target or not isAlive(target) then return end
+    teleportTo(target)
+    pcall(function()
+        local remotes = ReplicatedStorage:FindFirstChild("Remotes")
+        if remotes then
+            for _,v in pairs(remotes:GetChildren()) do
+                if v:IsA("RemoteEvent") then
+                    pcall(function() v:FireServer(target.Character) end)
+                end
+            end
+        end
+    end)
+    if CFG.FruitSupport then useSkills() end
+    if CFG.InstantKill then
+        for i = 1,50 do
+            teleportTo(target)
+            pcall(function()
+                local remotes = ReplicatedStorage:FindFirstChild("Remotes")
+                if remotes then
+                    for _,v in pairs(remotes:GetChildren()) do
+                        if v:IsA("RemoteEvent") then
+                            pcall(function() v:FireServer(target.Character) end)
+                        end
+                    end
+                end
+            end)
+            task.wait(0)
+            if not isAlive(target) then
+                killCount = killCount + 1
+                serverKills = serverKills + 1
+                gainedBounty = gainedBounty + getBounty(target)
+                break
+            end
+        end
+    end
+end
+
+local function findBestTarget()
+    local best, lowestHP = nil, math.huge
+    for _,p in pairs(Players:GetPlayers()) do
+        if p == LP then continue end
+        if not isAlive(p) then continue end
+        if CFG.SelectedTeam == "Pirates" and (p.Team and p.Team.Name ~= "Pirates") then continue end
+        if CFG.SelectedTeam == "Marines" and (p.Team and p.Team.Name ~= "Marines") then continue end
+        local hum = p.Character:FindFirstChildOfClass("Humanoid")
+        if hum and hum.Health < lowestHP then
+            lowestHP = hum.Health
+            best = p
+        end
+    end
+    return best
+end
+
+local function hasPVPPlayer()
+    for _,p in pairs(Players:GetPlayers()) do
+        if p == LP then continue end
+        if isAlive(p) then return true end
+    end
+    return false
+end
+
+local function hopServer()
+    if hopCooldown then return end
+    hopCooldown = true
+    pcall(function() TeleportService:Teleport(game.PlaceId, LP) end)
+    task.wait(10)
+    hopCooldown = false
+end
+
+task.spawn(function()
+    while task.wait(5) do
+        if CFG.AutoHopServer and CFG.AutoBounty and not hasPVPPlayer() then
+            hopServer()
+        end
+    end
+end)
+
+task.spawn(function()
+    while task.wait(1) do
+        if CFG.AutoV3 and CFG.AutoBounty then
+            pcall(function()
+                UserInputService.InputBegan:Fire(
+                    {KeyCode=Enum.KeyCode.J, UserInputType=Enum.UserInputType.Keyboard}, false
+                )
+            end)
+        end
+        if CFG.AutoV4 and CFG.AutoBounty then
+            pcall(function()
+                UserInputService.InputBegan:Fire(
+                    {KeyCode=Enum.KeyCode.K, UserInputType=Enum.UserInputType.Keyboard}, false
+                )
+            end)
+        end
+    end
+end)
+
+local function startAutoBounty()
+    if autoBountyConn then autoBountyConn:Disconnect() end
+    autoBountyConn = RunService.Heartbeat:Connect(function()
+        if not CFG.AutoBounty then return end
+        if not currentTarget or not isAlive(currentTarget) then
+            task.wait(CFG.SwitchDelay)
+            currentTarget = findBestTarget()
+            return
+        end
+        killTarget(currentTarget)
+        if CFG.AutoSwitch and not isAlive(currentTarget) then
+            task.wait(CFG.SwitchDelay)
+            currentTarget = findBestTarget()
+        end
+        task.wait(CFG.Humanizer and math.random(1,3)/100 or CFG.KillDelay)
+    end)
+end
+
+local function stopAutoBounty()
+    if autoBountyConn then autoBountyConn:Disconnect(); autoBountyConn = nil end
+    currentTarget = nil
+end
+
+LP.Idled:Connect(function()
+    if CFG.AntiAFK then
+        local VU = game:GetService("VirtualUser")
+        VU:Button2Down(Vector2.new(0,0), workspace.CurrentCamera.CFrame)
+        task.wait(1)
+        VU:Button2Up(Vector2.new(0,0), workspace.CurrentCamera.CFrame)
+    end
+end)
+
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = "VoidAutoBounty"
+ScreenGui.ResetOnSpawn = false
+ScreenGui.IgnoreGuiInset = true
+pcall(function() ScreenGui.Parent = game:GetService("CoreGui") end)
+if not ScreenGui.Parent then ScreenGui.Parent = LP:WaitForChild("PlayerGui") end
+
+local C = {
+    bg      = Color3.fromRGB(8,6,18),
+    surface = Color3.fromRGB(16,12,34),
+    sur2    = Color3.fromRGB(22,16,44),
+    sur3    = Color3.fromRGB(28,20,54),
+    purple  = Color3.fromRGB(130,70,210),
+    purpleL = Color3.fromRGB(180,120,255),
+    purpleD = Color3.fromRGB(55,28,95),
+    cyan    = Color3.fromRGB(80,200,220),
+    text    = Color3.fromRGB(220,200,255),
+    dim     = Color3.fromRGB(100,75,140),
+    red     = Color3.fromRGB(220,60,80),
+    green   = Color3.fromRGB(50,220,110),
+    gold    = Color3.fromRGB(220,180,60),
+    orange  = Color3.fromRGB(220,140,50),
+    marine  = Color3.fromRGB(50,100,220),
+    pirate  = Color3.fromRGB(180,50,50),
+    active  = Color3.fromRGB(50,180,100),
+}
+
+local function corner(p,r) local c=Instance.new("UICorner",p);c.CornerRadius=UDim.new(0,r or 8) end
+local function stroke(p,col,th,tr) local s=Instance.new("UIStroke",p);s.Color=col or C.purple;s.Thickness=th or 1;s.Transparency=tr or 0.4 end
+local function tw(obj,props,t) TweenService:Create(obj,TweenInfo.new(t or 0.2,Enum.EasingStyle.Quint),props):Play() end
+local function mkLbl(par,txt,sz,col,bold,xa,x,y,w,h)
+    local l=Instance.new("TextLabel",par)
+    l.BackgroundTransparency=1;l.Text=txt;l.TextSize=sz
+    l.Font=bold and Enum.Font.GothamBold or Enum.Font.Gotham
+    l.TextColor3=col;l.TextXAlignment=xa or Enum.TextXAlignment.Left
+    l.Size=UDim2.new(0,w,0,h);l.Position=UDim2.new(0,x,0,y)
+    return l
+end
+
+local TW,TH = 480,520
+local LW = 155
+local RW = TW-LW-6
+
+local Main = Instance.new("Frame",ScreenGui)
+Main.Size = UDim2.new(0,TW,0,0)
+Main.Position = UDim2.new(0.5,-TW/2,0.3,0)
+Main.BackgroundColor3 = C.bg
+Main.BorderSizePixel = 0
+corner(Main,12); stroke(Main,C.purple,1.5,0.2)
+
+local bgG=Instance.new("UIGradient",Main)
+bgG.Color=ColorSequence.new({
+    ColorSequenceKeypoint.new(0,Color3.fromRGB(14,9,30)),
+    ColorSequenceKeypoint.new(1,Color3.fromRGB(6,4,14)),
+})
+bgG.Rotation=135
+
+local TopBar=Instance.new("Frame",Main)
+TopBar.Size=UDim2.new(1,0,0,52)
+TopBar.BackgroundColor3=C.surface
+TopBar.BorderSizePixel=0;corner(TopBar,12)
+local tg=Instance.new("UIGradient",TopBar)
+tg.Color=ColorSequence.new({
+    ColorSequenceKeypoint.new(0,Color3.fromRGB(28,14,58)),
+    ColorSequenceKeypoint.new(1,Color3.fromRGB(12,7,28)),
+})
+tg.Rotation=90
+local tline=Instance.new("Frame",TopBar)
+tline.Size=UDim2.new(1,0,0,1);tline.Position=UDim2.new(0,0,1,-1)
+tline.BackgroundColor3=C.purple;tline.BorderSizePixel=0
+
+local function mkStat(parent,label,valCol,x,w)
+    local f=Instance.new("Frame",parent)
+    f.Size=UDim2.new(0,w,1,0);f.Position=UDim2.new(0,x,0,0)
+    f.BackgroundTransparency=1
+    local vl=mkLbl(f,"0",16,valCol,true,Enum.TextXAlignment.Center,0,4,w,22)
+    mkLbl(f,label,8,C.dim,false,Enum.TextXAlignment.Center,0,26,w,14)
+    if x>0 then
+        local dv=Instance.new("Frame",f)
+        dv.Size=UDim2.new(0,1,0,28);dv.Position=UDim2.new(0,0,0.5,-14)
+        dv.BackgroundColor3=C.purpleD;dv.BorderSizePixel=0
+    end
+    return vl
+end
+
+local killStatLbl  = mkStat(TopBar,"KILLS",C.red,0,90)
+local gainStatLbl  = mkStat(TopBar,"GAINED",C.green,90,110)
+local pingStatLbl  = mkStat(TopBar,"PING",C.orange,200,80)
+local plrStatLbl   = mkStat(TopBar,"PLAYERS",C.cyan,280,80)
+local timeStatLbl  = mkStat(TopBar,"TIME",C.purpleL,360,80)
+
+local CloseBtn=Instance.new("TextButton",TopBar)
+CloseBtn.Size=UDim2.new(0,24,0,20)
+CloseBtn.Position=UDim2.new(1,-28,0.5,-10)
+CloseBtn.BackgroundColor3=C.red;CloseBtn.Text="✕"
+CloseBtn.TextColor3=Color3.new(1,1,1);CloseBtn.Font=Enum.Font.GothamBold
+CloseBtn.TextSize=10;CloseBtn.BorderSizePixel=0;corner(CloseBtn,4)
+CloseBtn.MouseButton1Click:Connect(function()
+    stopAutoBounty()
+    tw(Main,{Size=UDim2.new(0,TW,0,0)},0.3)
+    task.wait(0.35);ScreenGui:Destroy()
+end)
+
+local progBg=Instance.new("Frame",Main)
+progBg.Size=UDim2.new(1,-10,0,16);progBg.Position=UDim2.new(0,5,0,56)
+progBg.BackgroundColor3=C.surface;progBg.BorderSizePixel=0;corner(progBg,4)
+stroke(progBg,C.purpleD,1,0.6)
+local progFill=Instance.new("Frame",progBg)
+progFill.Size=UDim2.new(0,0,1,0);progFill.BackgroundColor3=C.purple
+progFill.BorderSizePixel=0;corner(progFill,4)
+local progLbl=mkLbl(progBg,"SERVER PROGRESS  0 / 10 kills",8,C.dim,false,Enum.TextXAlignment.Left,6,0,300,16)
+local progPctLbl=mkLbl(progBg,"0%",8,C.purpleL,true,Enum.TextXAlignment.Right,0,0,TW-20,16)
+
+local LeftPanel=Instance.new("Frame",Main)
+LeftPanel.Size=UDim2.new(0,LW,0,TH-76)
+LeftPanel.Position=UDim2.new(0,3,0,76)
+LeftPanel.BackgroundColor3=C.surface
+LeftPanel.BorderSizePixel=0;corner(LeftPanel,8)
+stroke(LeftPanel,C.purpleD,1,0.5)
+
+local avBg=Instance.new("Frame",LeftPanel)
+avBg.Size=UDim2.new(0,60,0,60);avBg.Position=UDim2.new(0.5,-30,0,8)
+avBg.BackgroundColor3=C.purpleD;avBg.BorderSizePixel=0;corner(avBg,30)
+stroke(avBg,C.purple,2,0.3)
+mkLbl(avBg,"👤",26,C.purpleL,false,Enum.TextXAlignment.Center,0,0,60,60)
+
+mkLbl(LeftPanel,hideName(LP.Name),10,C.text,true,Enum.TextXAlignment.Center,0,72,LW,14)
+
+local bountyLbl=mkLbl(LeftPanel,formatNum(getBounty(LP)),13,C.green,true,Enum.TextXAlignment.Center,0,88,LW,18)
+
+local premBadge=Instance.new("Frame",LeftPanel)
+premBadge.Size=UDim2.new(1,-10,0,22);premBadge.Position=UDim2.new(0,5,0,110)
+premBadge.BackgroundColor3=Color3.fromRGB(40,30,10);premBadge.BorderSizePixel=0;corner(premBadge,6)
+stroke(premBadge,C.gold,1,0.3)
+mkLbl(premBadge,"⭐ PREMIUM ACTIVE",9,C.gold,true,Enum.TextXAlignment.Center,0,0,LW-10,22)
+
+local lockFrame=Instance.new("Frame",LeftPanel)
+lockFrame.Size=UDim2.new(1,-10,0,50);lockFrame.Position=UDim2.new(0,5,0,138)
+lockFrame.BackgroundColor3=C.sur2;lockFrame.BorderSizePixel=0;corner(lockFrame,6)
+stroke(lockFrame,C.purpleD,1,0.5)
+mkLbl(lockFrame,"[ LOCKING ]",8,C.dim,true,Enum.TextXAlignment.Left,6,2,LW,12)
+local lockNameLbl=mkLbl(lockFrame,"None",10,C.purpleL,true,Enum.TextXAlignment.Left,6,16,LW-10,14)
+local lockLvLbl=mkLbl(lockFrame,"Lv. —",8,C.dim,false,Enum.TextXAlignment.Left,6,32,LW-10,12)
+
+local infoFrame=Instance.new("Frame",LeftPanel)
+infoFrame.Size=UDim2.new(1,-10,0,56);infoFrame.Position=UDim2.new(0,5,0,194)
+infoFrame.BackgroundColor3=C.sur2;infoFrame.BorderSizePixel=0;corner(infoFrame,6)
+mkLbl(infoFrame,"Level",8,C.dim,false,Enum.TextXAlignment.Left,6,2,80,12)
+local myLvLbl=mkLbl(infoFrame,"—",9,C.text,true,Enum.TextXAlignment.Left,6,14,80,14)
+mkLbl(infoFrame,"Faction",8,C.dim,false,Enum.TextXAlignment.Left,6,30,80,12)
+local factionLbl=mkLbl(infoFrame,"Pirates",9,C.pirate,true,Enum.TextXAlignment.Left,6,42,80,14)
+mkLbl(infoFrame,"Region",8,C.dim,false,Enum.TextXAlignment.Right,0,2,LW-8,12)
+local regionInfoLbl=mkLbl(infoFrame,CFG.SelectedRegion,9,C.cyan,true,Enum.TextXAlignment.Right,0,14,LW-8,14)
+mkLbl(infoFrame,"Fruit",8,C.dim,false,Enum.TextXAlignment.Right,0,30,LW-8,12)
+local fruitInfoLbl=mkLbl(infoFrame,CFG.SelectedFruit,9,C.purpleL,true,Enum.TextXAlignment.Right,0,42,LW-8,14)
+
+local teamY=256
+mkLbl(LeftPanel,"TEAM",8,C.dim,true,Enum.TextXAlignment.Left,6,teamY,LW,12)
+local pirBtn=Instance.new("TextButton",LeftPanel)
+pirBtn.Size=UDim2.new(0,65,0,22);pirBtn.Position=UDim2.new(0,5,0,teamY+14)
+pirBtn.BackgroundColor3=C.pirate;pirBtn.Text="🏴 Pirates"
+pirBtn.TextColor3=Color3.new(1,1,1);pirBtn.Font=Enum.Font.GothamBold
+pirBtn.TextSize=8;pirBtn.BorderSizePixel=0;corner(pirBtn,5)
+local marBtn=Instance.new("TextButton",LeftPanel)
+marBtn.Size=UDim2.new(0,65,0,22);marBtn.Position=UDim2.new(0,80,0,teamY+14)
+marBtn.BackgroundColor3=C.purpleD;marBtn.Text="⚓ Marines"
+marBtn.TextColor3=C.dim;marBtn.Font=Enum.Font.GothamBold
+marBtn.TextSize=8;marBtn.BorderSizePixel=0;corner(marBtn,5)
+pirBtn.MouseButton1Click:Connect(function()
+    CFG.SelectedTeam="Pirates"
+    factionLbl.Text="Pirates";factionLbl.TextColor3=C.pirate
+    tw(pirBtn,{BackgroundColor3=C.pirate},0.15);pirBtn.TextColor3=Color3.new(1,1,1)
+    tw(marBtn,{BackgroundColor3=C.purpleD},0.15);marBtn.TextColor3=C.dim
+end)
+marBtn.MouseButton1Click:Connect(function()
+    CFG.SelectedTeam="Marines"
+    factionLbl.Text="Marines";factionLbl.TextColor3=C.marine
+    tw(marBtn,{BackgroundColor3=C.marine},0.15);marBtn.TextColor3=Color3.new(1,1,1)
+    tw(pirBtn,{BackgroundColor3=C.purpleD},0.15);pirBtn.TextColor3=C.dim
+end)
+
+local regY=teamY+44
+mkLbl(LeftPanel,"REGION",8,C.dim,true,Enum.TextXAlignment.Left,6,regY,LW,12)
+local regions={"HK","US","EU","SG","BR"}
+local regBtns={}
+for i,r in ipairs(regions) do
+    local col=math.floor((i-1)/3)
+    local row=(i-1)%3
+    local rb=Instance.new("TextButton",LeftPanel)
+    rb.Size=UDim2.new(0,42,0,18)
+    rb.Position=UDim2.new(0,5+row*48,0,regY+14+col*22)
+    rb.BackgroundColor3=r==CFG.SelectedRegion and C.purple or C.purpleD
+    rb.Text=r;rb.TextColor3=r==CFG.SelectedRegion and Color3.new(1,1,1) or C.dim
+    rb.Font=Enum.Font.GothamBold;rb.TextSize=8
+    rb.BorderSizePixel=0;corner(rb,4)
+    table.insert(regBtns,{btn=rb,name=r})
+    rb.MouseButton1Click:Connect(function()
+        CFG.SelectedRegion=r;regionInfoLbl.Text=r
+        for _,v in pairs(regBtns) do
+            tw(v.btn,{BackgroundColor3=v.name==r and C.purple or C.purpleD},0.15)
+            v.btn.TextColor3=v.name==r and Color3.new(1,1,1) or C.dim
+        end
+    end)
+end
+
+local fruitY=regY+58
+mkLbl(LeftPanel,"FRUIT",8,C.dim,true,Enum.TextXAlignment.Left,6,fruitY,LW,12)
+local fruits={"TRex","Kit","Leo","Dragon","Kitsune","Dough","Shadow"}
+local fbtns={}
+for i,f in ipairs(fruits) do
+    local col=math.floor((i-1)/3)
+    local row=(i-1)%3
+    local fb=Instance.new("TextButton",LeftPanel)
+    fb.Size=UDim2.new(0,42,0,18)
+    fb.Position=UDim2.new(0,5+row*48,0,fruitY+14+col*22)
+    fb.BackgroundColor3=f==CFG.SelectedFruit and C.purple or C.purpleD
+    fb.Text=f;fb.TextColor3=f==CFG.SelectedFruit and Color3.new(1,1,1) or C.dim
+    fb.Font=Enum.Font.GothamBold;fb.TextSize=7
+    fb.BorderSizePixel=0;corner(fb,4)
+    table.insert(fbtns,{btn=fb,name=f})
+    fb.MouseButton1Click:Connect(function()
+        CFG.SelectedFruit=f;fruitInfoLbl.Text=f
+        for _,v in pairs(fbtns) do
+            tw(v.btn,{BackgroundColor3=v.name==f and C.purple or C.purpleD},0.15)
+            v.btn.TextColor3=v.name==f and Color3.new(1,1,1) or C.dim
+        end
+    end)
+end
+
+local RightPanel=Instance.new("Frame",Main)
+RightPanel.Size=UDim2.new(0,RW,0,TH-76)
+RightPanel.Position=UDim2.new(0,LW+6,0,76)
+RightPanel.BackgroundColor3=C.surface
+RightPanel.BorderSizePixel=0;corner(RightPanel,8)
+stroke(RightPanel,C.purpleD,1,0.5)
+
+local hdrFrame=Instance.new("Frame",RightPanel)
+hdrFrame.Size=UDim2.new(1,0,0,22);hdrFrame.BackgroundTransparency=1
+mkLbl(hdrFrame,"TARGET LIST",8,C.dim,true,Enum.TextXAlignment.Left,8,4,120,14)
+mkLbl(hdrFrame,"HP BAR",8,C.dim,true,Enum.TextXAlignment.Center,100,4,120,14)
+mkLbl(hdrFrame,"STATUS",8,C.dim,true,Enum.TextXAlignment.Right,0,4,RW-8,14)
+local hdrLine=Instance.new("Frame",RightPanel)
+hdrLine.Size=UDim2.new(1,-16,0,1);hdrLine.Position=UDim2.new(0,8,0,22)
+hdrLine.BackgroundColor3=C.purpleD;hdrLine.BorderSizePixel=0
+
+local scroll=Instance.new("ScrollingFrame",RightPanel)
+scroll.Size=UDim2.new(1,-8,0,TH-76-120)
+scroll.Position=UDim2.new(0,4,0,26)
+scroll.BackgroundTransparency=1;scroll.BorderSizePixel=0
+scroll.ScrollBarThickness=3;scroll.ScrollBarImageColor3=C.purple
+scroll.CanvasSize=UDim2.new(0,0,0,0)
+local listLayout=Instance.new("UIListLayout",scroll)
+listLayout.Padding=UDim.new(0,3);listLayout.SortOrder=Enum.SortOrder.LayoutOrder
+
+local function makeRow(player)
+    local row=Instance.new("Frame",scroll)
+    row.Size=UDim2.new(1,-4,0,38)
+    row.BackgroundColor3=currentTarget==player and C.sur3 or C.sur2
+    row.BorderSizePixel=0;corner(row,6)
+    if currentTarget==player then stroke(row,C.purple,1,0.4) end
+    local nameCol=currentTarget==player and C.purpleL or C.text
+    mkLbl(row,hideName(player.Name),11,nameCol,true,Enum.TextXAlignment.Left,8,3,150,16)
+    mkLbl(row,"Lv. "..getLevel(player),8,C.dim,false,Enum.TextXAlignment.Left,8,20,100,13)
+    local hpBg=Instance.new("Frame",row)
+    hpBg.Size=UDim2.new(0,110,0,12);hpBg.Position=UDim2.new(0,130,0.5,-6)
+    hpBg.BackgroundColor3=C.purpleD;hpBg.BorderSizePixel=0;corner(hpBg,6)
+    local hpF=Instance.new("Frame",hpBg)
+    local pct=getHPPercent(player)
+    hpF.Size=UDim2.new(pct/100,0,1,0);hpF.BorderSizePixel=0;corner(hpF,6)
+    if pct>60 then hpF.BackgroundColor3=C.green
+    elseif pct>30 then hpF.BackgroundColor3=C.gold
+    else hpF.BackgroundColor3=C.red end
+    mkLbl(hpBg,pct.."%",7,Color3.new(1,1,1),true,Enum.TextXAlignment.Center,0,0,110,12)
+    local actBtn=Instance.new("TextButton",row)
+    actBtn.Size=UDim2.new(0,52,0,22);actBtn.Position=UDim2.new(1,-58,0.5,-11)
+    local isTarget=currentTarget==player
+    actBtn.BackgroundColor3=isTarget and C.active or C.purpleD
+    actBtn.Text=isTarget and "✓ Active" or "Target"
+    actBtn.TextColor3=Color3.new(1,1,1);actBtn.Font=Enum.Font.GothamBold
+    actBtn.TextSize=8;actBtn.BorderSizePixel=0;corner(actBtn,5)
+    actBtn.MouseButton1Click:Connect(function()
+        if currentTarget==player then
+            currentTarget=nil
+            actBtn.Text="Target";tw(actBtn,{BackgroundColor3=C.purpleD},0.15)
+            tw(row,{BackgroundColor3=C.sur2},0.15)
+            lockNameLbl.Text="None";lockLvLbl.Text="Lv. —"
+        else
+            currentTarget=player
+            actBtn.Text="✓ Active";tw(actBtn,{BackgroundColor3=C.active},0.15)
+            tw(row,{BackgroundColor3=C.sur3},0.15)
+            lockNameLbl.Text=hideName(player.Name)
+            lockLvLbl.Text="Lv. "..getLevel(player)
+        end
+    end)
+    return row
+end
+
+local function refreshList()
+    for _,c in pairs(scroll:GetChildren()) do
+        if c:IsA("Frame") then c:Destroy() end
+    end
+    local count=0
+    for _,p in pairs(Players:GetPlayers()) do
+        if p~=LP then makeRow(p);count=count+1 end
+    end
+    scroll.CanvasSize=UDim2.new(0,0,0,count*41)
+end
+
+local btnFrame=Instance.new("Frame",RightPanel)
+btnFrame.Size=UDim2.new(1,-8,0,32);btnFrame.Position=UDim2.new(0,4,0,TH-76-38)
+btnFrame.BackgroundTransparency=1
+
+local function mkBottomBtn(label,col,x,w,cb)
+    local b=Instance.new("TextButton",btnFrame)
+    b.Size=UDim2.new(0,w,1,0);b.Position=UDim2.new(0,x,0,0)
+    b.BackgroundColor3=col;b.Text=label
+    b.TextColor3=Color3.new(1,1,1);b.Font=Enum.Font.GothamBold
+    b.TextSize=10;b.BorderSizePixel=0;corner(b,6)
+    b.MouseButton1Click:Connect(function() if cb then cb() end end)
+    return b
+end
+
+local huntingBtn=mkBottomBtn("● HUNTING",C.active,0,98,function()
+    CFG.AutoBounty=not CFG.AutoBounty
+    if CFG.AutoBounty then
+        startAutoBounty()
+        huntingBtn.BackgroundColor3=C.active
+        huntingBtn.Text="● HUNTING"
+    else
+        stopAutoBounty()
+        huntingBtn.BackgroundColor3=C.purpleD
+        huntingBtn.Text="○ HUNTING"
+    end
+end)
+
+mkBottomBtn("🌏 HOP SV",C.purple,102,88,function() hopServer() end)
+mkBottomBtn("🔄 RESET",C.red,194,78,function()
+    killCount=0;gainedBounty=0;serverKills=0
+    sessionStart=tick();currentTarget=nil
+end)
+
+local toggleY2=TH-76-120+26
+local toggleData={
+    {"⚡","Instant Kill","InstantKill"},
+    {"🍎","Fruit Support","FruitSupport"},
+    {"🔄","Auto Switch","AutoSwitch"},
+    {"🌏","Auto Hop","AutoHopServer"},
+    {"💎","Auto V3","AutoV3"},
+    {"👑","Auto V4","AutoV4"},
+    {"🛡️","Anti AFK","AntiAFK"},
+}
+local tCols=2
+for i,td in ipairs(toggleData) do
+    local col=(i-1)%tCols
+    local row=math.floor((i-1)/tCols)
+    local tw2=math.floor((RW-16)/tCols)
+    local tb=Instance.new("TextButton",RightPanel)
+    tb.Size=UDim2.new(0,tw2,0,22)
+    tb.Position=UDim2.new(0,4+col*(tw2+4),0,toggleY2+row*26)
+    tb.BackgroundColor3=CFG[td[3]] and C.sur3 or C.sur2
+    tb.Text="";tb.AutoButtonColor=false;tb.BorderSizePixel=0;corner(tb,5)
+    stroke(tb,C.purpleD,1,0.7)
+    mkLbl(tb,td[1],11,C.purpleL,false,Enum.TextXAlignment.Left,4,0,20,22)
+    mkLbl(tb,td[2],8,C.text,true,Enum.TextXAlignment.Left,20,0,tw2-50,22)
+    local sLbl=mkLbl(tb,CFG[td[3]] and "ON" or "OFF",8,CFG[td[3]] and C.green or C.dim,true,Enum.TextXAlignment.Right,0,0,tw2-4,22)
+    tb.MouseButton1Click:Connect(function()
+        CFG[td[3]]=not CFG[td[3]]
+        local on=CFG[td[3]]
+        tw(tb,{BackgroundColor3=on and C.sur3 or C.sur2},0.15)
+        sLbl.Text=on and "ON" or "OFF"
+        sLbl.TextColor3=on and C.green or C.dim
+    end)
+end
+
+local refreshT=0
+RunService.Heartbeat:Connect(function(dt)
+    killStatLbl.Text=tostring(killCount)
+    gainStatLbl.Text=formatNum(gainedBounty)
+    pingStatLbl.Text=math.random(80,200).."ms"
+    plrStatLbl.Text=tostring(#Players:GetPlayers()-1)
+    timeStatLbl.Text=math.floor(tick()-sessionStart).."s"
+    local prog=math.min(serverKills/CFG.MaxKills,1)
+    tw(progFill,{Size=UDim2.new(prog,0,1,0)},0.3)
+    progLbl.Text="SERVER PROGRESS  "..serverKills.." / "..CFG.MaxKills.." kills"
+    progPctLbl.Text=math.floor(prog*100).."%"
+    if currentTarget and isAlive(currentTarget) then
+        lockNameLbl.Text=hideName(currentTarget.Name)
+        lockLvLbl.Text="Lv. "..getLevel(currentTarget)
+    end
+    bountyLbl.Text=formatNum(getBounty(LP))
+    myLvLbl.Text=tostring(getLevel(LP))
+    refreshT=refreshT+dt
+    if refreshT>=2 then refreshT=0;refreshList() end
+end)
+
+local drag,ds,sp=false,nil,nil
+TopBar.InputBegan:Connect(function(i)
+    if i.UserInputType==Enum.UserInputType.Touch or i.UserInputType==Enum.UserInputType.MouseButton1 then
+        drag=true;ds=i.Position;sp=Main.Position
+    end
+end)
+TopBar.InputEnded:Connect(function(i)
+    if i.UserInputType==Enum.UserInputType.Touch or i.UserInputType==Enum.UserInputType.MouseButton1 then drag=false end
+end)
+UserInputService.InputChanged:Connect(function(i)
+    if drag and (i.UserInputType==Enum.UserInputType.Touch or i.UserInputType==Enum.UserInputType.MouseMovement) then
+        local d=i.Position-ds
+        Main.Position=UDim2.new(sp.X.Scale,sp.X.Offset+d.X,sp.Y.Scale,sp.Y.Offset+d.Y)
+    end
+end)
+
+Players.PlayerAdded:Connect(refreshList)
+Players.PlayerRemoving:Connect(refreshList)
+refreshList()
+
+tw(Main,{Size=UDim2.new(0,TW,0,TH)},0.45)
+print("[VoidAutoBounty v5.0] Loaded! by CursedExility")
