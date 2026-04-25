@@ -1,0 +1,6 @@
+{
+  "version": "1.0",
+  "combat_remote": "Remotes",
+  "damage_remote": "DamagePlayer",
+  "auto_bounty": true
+}
