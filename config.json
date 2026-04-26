@@ -1,6 +1,13 @@
 {
-  "version": "1.0",
-  "combat_remote": "Remotes",
-  "damage_remote": "DamagePlayer",
-  "auto_bounty": true
+    "team": "Pirates",
+    "region": "Hong Kong",
+    "remotes": {
+        "AttackRemote": "ReplicatedStorage.Remotes.Combat",
+        "SkillRemote": "ReplicatedStorage.Remotes.Skills"
+    },
+    "settings": {
+        "auto_m1": true,
+        "insta_kill": true,
+        "auto_v3_v4": true
+    }
 }
