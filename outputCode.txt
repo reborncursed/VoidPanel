@@ -1,0 +1,138 @@
+import requests
+import json
+import time
+import base64
+import os
+
+class BloxManager:
+    """
+    Manager for Blox Fruits automation configurations, server hopping,
+    and remote synchronization via GitHub API.
+    """
+    
+    def __init__(self, github_token, repo_owner, repo_name):
+        self.base_url = "https://games.roblox.com/v1/games/2747447639/servers/Public"
+        self.gh_api = f"https://api.github.com/repos/{repo_owner}/{repo_name}/contents/config.json"
+        self.headers = {"Authorization": f"token {github_token}"}
+        self.config = {
+            "team": "Pirates",
+            "region": "Hong Kong",
+            "remotes": {},
+            "settings": {
+                "auto_m1": True,
+                "insta_kill": True,
+                "auto_v3_v4": True
+            }
+        }
+
+    def set_team(self, team_name):
+        """Sets the active team: 'Pirates' or 'Marines'."""
+        if team_name.lower() in ["pirates", "marines"]:
+            self.config["team"] = team_name.capitalize()
+            print(f"[*] Team set to: {self.config['team']}")
+        else:
+            print("[!] Invalid team selection.")
+
+    def find_best_server(self, region="Hong Kong"):
+        """
+        Fetches public servers and filters based on ping/region heuristics.
+        Note: Roblox API does not directly expose region via Web API,
+        this usually requires a proxy or looking at server latency.
+        """
+        print(f"[*] Scanning for servers in {region}...")
+        try:
+            response = requests.get(self.base_url)
+            if response.status_code == 200:
+                servers = response.json().get("data", [])
+                # Sorting by lowest player count for faster loading/less lag
+                best_servers = sorted(servers, key=lambda x: x['playing'])
+                if best_servers:
+                    target = best_servers[0]
+                    print(f"[+] Found optimal server: {target['id']} ({target['playing']} players)")
+                    return target['id']
+            return None
+        except Exception as e:
+            print(f"[!] Server hop error: {e}")
+            return None
+
+    def sync_remotes_to_github(self, remote_data):
+        """
+        Updates the remote names in config.json on GitHub.
+        Used by the Remote Finder to keep the script updated.
+        """
+        self.config["remotes"] = remote_data
+        content = base64.b64encode(json.dumps(self.config, indent=4).encode()).decode()
+        
+        # Get current file SHA for update
+        get_res = requests.get(self.gh_api, headers=self.headers)
+        sha = get_res.json().get("sha") if get_res.status_code == 200 else None
+
+        data = {
+            "message": "Update remotes and configuration",
+            "content": content,
+            "sha": sha
+        }
+
+        res = requests.put(self.gh_api, headers=self.headers, json=data)
+        if res.status_code in [200, 201]:
+            print("[+] Config updated on GitHub successfully.")
+        else:
+            print(f"[!] GitHub sync failed: {res.text}")
+
+    def generate_lua_bridge(self):
+        """
+        Generates the Luau payload that interacts with the game engine.
+        Python handles logic/API; Luau handles game execution.
+        """
+        lua_script = f"""
+        -- Blox Fruits Auto Bounty Payload
+        local Config = {{
+            Team = "{self.config['team']}",
+            AutoM1 = {str(self.config['settings']['auto_m1']).lower()},
+            InstaKill = {str(self.config['settings']['insta_kill']).lower()},
+            AutoTransform = {str(self.config['settings']['auto_v3_v4']).lower()}
+        }}
+
+        local function scanRemotes()
+            local found = {{}}
+            for _, v in pairs(game:GetDescendants()) do
+                if v:IsA("RemoteEvent") or v:IsA("RemoteFunction") then
+                    found[v.Name] = v:GetFullName()
+                end
+            end
+            return found
+        end
+
+        -- Logic for Auto M1 and InstaKill would be injected here
+        -- using the found remotes.
+        print("Script initialized for team: " .. Config.Team)
+        """
+        return lua_script
+
+if __name__ == "__main__":
+    # Configuration (Replace with your GitHub details)
+    TOKEN = "YOUR_GITHUB_TOKEN"
+    OWNER = "YOUR_USERNAME"
+    REPO = "BloxConfig"
+
+    manager = BloxManager(TOKEN, OWNER, REPO)
+    
+    # 1. Select Team
+    manager.set_team("Pirates")
+    
+    # 2. Server Hop to specific region
+    server_id = manager.find_best_server("Hong Kong")
+    
+    # 3. Simulated Remote Finding Data (would be received from the game client)
+    detected_remotes = {
+        "AttackRemote": "ReplicatedStorage.Remotes.Combat",
+        "SkillRemote": "ReplicatedStorage.Remotes.Skills"
+    }
+    
+    # 4. Sync to GitHub
+    manager.sync_remotes_to_github(detected_remotes)
+    
+    # 5. Output internal script
+    print("\n--- Luau Payload Generated ---")
+    print(manager.generate_lua_bridge())
+
